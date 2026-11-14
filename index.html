@@ -1,0 +1,904 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Abandoned but Not Forgotten | NASA Planetary Archive</title>
+
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+</script>
+
+<style>
+  :root {
+    --glass: rgba(6, 11, 20, 0.88);
+    --line: rgba(139, 233, 255, 0.28);
+    --cyan: #8be9ff;
+    --mars: #ff9e6d;
+    --gold: #ffd58a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #020308; color: #f4f7ff;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    user-select: none; -webkit-user-select: none;
+  }
+  canvas { display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 3; }
+
+  .top {
+    position: absolute; top: 16px; left: 20px; right: 20px;
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  }
+  .brand, .panel, .controls, .site-list {
+    background: var(--glass);
+    border: 1px solid var(--line);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 16px;
+    box-shadow: 0 16px 50px rgba(0,0,0,0.7);
+  }
+  .brand { padding: 14px 18px; max-width: 440px; }
+  .eyebrow { font-size: 10px; letter-spacing: 0.24em; color: var(--cyan); font-weight: 800; text-transform: uppercase; }
+  .brand h1 { font-size: clamp(16px, 2vw, 21px); margin: 4px 0; letter-spacing: -0.02em; }
+  .brand p { margin: 0; color: #b5c4d8; font-size: 11px; line-height: 1.4; }
+
+  .actions { display: flex; gap: 8px; pointer-events: auto; flex-wrap: wrap; }
+  button {
+    border: 1px solid var(--line); background: rgba(16, 29, 50, 0.92);
+    color: #fff; padding: 10px 14px; border-radius: 11px;
+    font-weight: 700; font-size: 12px; cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  button:hover { border-color: var(--cyan); background: #182c4b; }
+  button.active { background: #d4f5ff; color: #06101c; border-color: #d4f5ff; }
+  button.mars-active { background: #ff9e6d; color: #1a0903; border-color: #ff9e6d; }
+  button.mode-active { background: #ffd58a; color: #171003; border-color: #ffd58a; }
+
+  /* 2D Map Overlay */
+  #mapContainer {
+    position: fixed; inset: 0; z-index: 2;
+    background: #020409; display: none;
+    align-items: center; justify-content: center;
+    cursor: grab;
+  }
+  #mapContainer:active { cursor: grabbing; }
+  #planetMapCanvas { width: 100%; height: 100%; display: block; }
+
+  /* Site Selector Sidebar */
+  .site-list {
+    position: absolute; left: 20px; top: 112px; width: 270px;
+    padding: 14px; pointer-events: auto; max-height: calc(100vh - 200px);
+    overflow-y: auto;
+  }
+  .site-list h3 { margin: 0 0 10px; font-size: 11px; letter-spacing: 0.16em; color: #94a8c4; text-transform: uppercase; }
+  .site-item {
+    padding: 10px 12px; border-radius: 10px; margin-bottom: 6px;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07);
+    cursor: pointer; transition: all 0.2s;
+  }
+  .site-item:hover, .site-item.selected {
+    background: rgba(139, 233, 255, 0.14); border-color: var(--cyan);
+  }
+  .site-item .name { font-weight: 700; font-size: 13px; color: #fff; }
+  .site-item .coords { font-family: monospace; font-size: 11px; color: var(--gold); margin-top: 2px; }
+  .site-item .region { font-size: 11px; color: #9fb0c7; }
+
+  /* Telemetry & Info Card */
+  #info {
+    position: absolute; right: 20px; top: 112px;
+    width: min(380px, calc(100vw - 40px));
+    padding: 20px; pointer-events: auto; display: none;
+  }
+  #info h2 { margin: 6px 0 4px; font-size: 20px; }
+  .telemetry-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    margin: 10px 0; padding: 10px; border-radius: 10px;
+    background: rgba(0, 0, 0, 0.45); border: 1px solid rgba(255,255,255,0.08);
+    font-family: monospace; font-size: 11px;
+  }
+  .telemetry-grid div span { display: block; color: #7e92ad; font-size: 9px; text-transform: uppercase; }
+  #info p { color: #c8d4e6; font-size: 13px; line-height: 1.55; margin: 8px 0; }
+  #info .legacy { color: var(--gold); font-size: 12px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px; }
+  #info .close { float: right; padding: 5px 9px; }
+
+  /* Mobile Touch Control Pads */
+  #touchControls {
+    position: absolute; bottom: 24px; left: 20px; right: 20px;
+    display: none; justify-content: space-between; pointer-events: none; z-index: 5;
+  }
+  .dpad { display: grid; grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(3, 46px); gap: 4px; pointer-events: auto; }
+  .dpad button { background: rgba(16, 29, 50, 0.85); border: 1px solid var(--line); color: #fff; border-radius: 10px; font-weight: 900; font-size: 16px; display: grid; place-items: center; }
+  .dpad button:active { background: var(--cyan); color: #000; }
+
+  .bottom {
+    position: absolute; bottom: 16px; left: 20px; right: 20px;
+    display: flex; justify-content: space-between; align-items: flex-end; gap: 12px;
+  }
+  .controls { padding: 10px 14px; color: #c5d1e2; font-size: 12px; }
+  .controls b { color: #fff; }
+  #coordReadout {
+    padding: 10px 14px; background: var(--glass); border: 1px solid var(--line);
+    border-radius: 12px; font-family: monospace; font-size: 12px; color: var(--cyan);
+  }
+
+  #crosshair {
+    position: absolute; left: 50%; top: 50%; width: 12px; height: 12px;
+    transform: translate(-50%, -50%); border: 1.5px solid rgba(217, 248, 255, 0.85);
+    border-radius: 50%; display: none; pointer-events: none;
+  }
+
+  #start {
+    position: fixed; inset: 0; display: grid; place-items: center;
+    background: radial-gradient(circle at center, #132038 0%, #020308 75%);
+    z-index: 10;
+  }
+  .startcard {
+    width: min(540px, calc(100vw - 32px)); padding: 32px;
+    border: 1px solid var(--line); border-radius: 24px;
+    background: rgba(10, 17, 32, 0.96); box-shadow: 0 35px 100px #000;
+  }
+  .startcard h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.08; margin: 10px 0 14px; }
+  .startcard p { color: #bac8dc; line-height: 1.6; font-size: 14px; }
+  .startcard button {
+    background: #8be9ff; border: 0; color: #050d17;
+    border-radius: 12px; padding: 14px 22px; font-weight: 900; font-size: 14px; margin-top: 10px; width: 100%;
+  }
+  @media(max-width: 760px) {
+    .site-list { display: none; }
+    .top { flex-direction: column; }
+    #touchControls { display: flex; }
+  }
+</style>
+</head>
+<body>
+
+<div id="start">
+  <div class="startcard">
+    <div class="eyebrow">NASA PLANETARY ARCHIVE • V3.5 ULTIMATE REALISM</div>
+    <h1>Abandoned but<br>Not Forgotten</h1>
+    <p>Explore historic Moon and Mars landing sites with hyper-realistic PBR materials, atmospheric particle dynamics, scientific telemetry, and full mobile support.</p>
+    <p style="font-size:12px; color:#8fa4c2;"><b>Controls:</b> WASD / D-Pad to walk • Mouse or Touch drag to look around • Click beacons/pins for full telemetry.</p>
+    <button id="startBtn">LAUNCH IMMERSIVE MISSION</button>
+  </div>
+</div>
+
+<div id="mapContainer">
+  <canvas id="planetMapCanvas"></canvas>
+</div>
+
+<div id="hud">
+  <div class="top">
+    <div class="brand">
+      <div class="eyebrow" id="modeBadge">ORBITAL RECONNAISSANCE</div>
+      <h1 id="worldTitle">THE MOON (LUNA)</h1>
+      <p id="worldSub">Real-coordinate map of Apollo & robotic surface hardware</p>
+    </div>
+    <div class="actions">
+      <button id="moonBtn" class="active">🌕 Moon</button>
+      <button id="marsBtn">🔴 Mars</button>
+      <button id="orbitModeBtn" class="mode-active">🛰️ Globe</button>
+      <button id="mapModeBtn">🗺️ Map</button>
+      <button id="surfaceModeBtn">🚶 Walk</button>
+    </div>
+  </div>
+
+  <div class="site-list" id="siteList"></div>
+  <div id="crosshair"></div>
+
+  <div id="info" class="panel">
+    <button class="close" id="closeInfo">✕</button>
+    <div class="eyebrow" id="infoTag">MISSION HARDWARE</div>
+    <h2 id="infoTitle">Apollo 11 Eagle</h2>
+    <div class="telemetry-grid">
+      <div><span>Coordinates</span><b id="infoCoords">0.67416° N, 23.47314° E</b></div>
+      <div><span>Surface Temp</span><b id="infoTemp">-130°C to +120°C</b></div>
+      <div><span>Gravity</span><b id="infoGravity">1.62 m/s²</b></div>
+      <div><span>Radiation</span><b id="infoRad">120 µSv/day</b></div>
+    </div>
+    <p id="infoText"></p>
+    <p class="legacy" id="infoExtra"></p>
+    <button id="landHereBtn" style="width:100%; margin-top:8px; background:#8be9ff; color:#050d17;">🚶 Land & Walk at This Site</button>
+  </div>
+
+  <div id="touchControls">
+    <div class="dpad">
+      <div></div><button id="btnW">▲</button><div></div>
+      <button id="btnA">◀</button><button id="btnS">■</button><button id="btnD">▶</button>
+      <div></div><button id="btnB">▼</button><div></div>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="controls" id="controlsHint"><b>Drag</b> Rotate Globe · <b>Scroll</b> Zoom · <b>Click Beacon</b> Select Site</div>
+    <div id="coordReadout">LAT: 0.0000° | LON: 0.0000°</div>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const MISSIONS = {
+  moon: [
+    { id: 'apollo11', name: 'Apollo 11 LM Eagle & LRRR', type: 'lander', lat: 0.67416, lon: 23.47314, coordStr: '0.67416° N, 23.47314° E', region: 'Mare Tranquillitatis', date: 'July 20, 1969', status: 'Reflector Active', temp: '-150°C to +100°C', grav: '1.62 m/s²', rad: '115 µSv/day', tag: 'APOLLO 11 • TRANQUILITY BASE', text: 'The descent stage of Lunar Module Eagle remains upright where humans first stepped onto another world. Twenty meters south sits the Lunar Laser Ranging Retroreflector (LRRR).', legacy: 'Scientific Legacy: Laser pulses bounced off Apollo 11’s mirrors proved the Moon is receding from Earth at 3.8 cm per year.' },
+    { id: 'apollo15', name: 'Apollo 15 Lunar Roving Vehicle', type: 'lunar_rover', lat: 26.1322, lon: 3.6339, coordStr: '26.1322° N, 3.6339° E', region: 'Hadley–Apennine', date: 'July 31, 1971', status: 'Parked / Dormant', temp: '-140°C to +95°C', grav: '1.62 m/s²', rad: '130 µSv/day', tag: 'APOLLO 15 • FIRST LUNAR CAR', text: 'Driven 27.9 km across the base of the Montes Apenninus mountains, LRV-1 allowed astronauts to recover the famous 4.1-billion-year-old Genesis Rock.', legacy: 'Scientific Legacy: Quadrupled the exploration radius of lunar field science.' },
+    { id: 'apollo12', name: 'Apollo 12 & Surveyor 3', type: 'alsep', lat: -3.0124, lon: -23.4216, coordStr: '3.0124° S, 23.4216° W', region: 'Oceanus Procellarum', date: 'Nov 19, 1969', status: 'Dormant', temp: '-160°C to +110°C', grav: '1.62 m/s²', rad: '125 µSv/day', tag: 'APOLLO 12 • PRECISION LANDING', text: 'Landed just 163 meters from the robotic Surveyor 3 spacecraft that arrived two years earlier.', legacy: 'Scientific Legacy: Proved pinpoint landing and long-term space weathering.' },
+    { id: 'apollo17', name: 'Apollo 17 Challenger & LRV-3', type: 'lunar_rover', lat: 20.1908, lon: 30.7717, coordStr: '20.1908° N, 30.7717° E', region: 'Taurus–Littrow Valley', date: 'Dec 11, 1972', status: 'Last Crew Site', temp: '-145°C to +105°C', grav: '1.62 m/s²', rad: '135 µSv/day', tag: 'APOLLO 17 • FINAL APOLLO MISSION', text: 'The final human footsteps on the Moon. The Challenger descent stage and LRV-3 remain preserved in the valley.', legacy: 'Scientific Legacy: Discovered orange volcanic glass beads proving ancient lunar volcanism.' }
+  ],
+  mars: [
+    { id: 'perseverance', name: 'Perseverance Rover (Mars 2020)', type: 'msl_rover', lat: 18.447, lon: 77.402, coordStr: '18.447° N, 77.402° E', region: 'Jezero Crater', date: 'Feb 18, 2021', status: 'Active / Record Holder', temp: '-80°C to +20°C', grav: '3.72 m/s²', rad: '550 µSv/day', tag: 'MARS 2020 • ASTROBIOLOGY', text: 'Exploring an ancient river delta inside Jezero Crater, caching rock cores for Mars Sample Return.', legacy: 'Scientific Legacy: Discovered organic-rich mudstones and produced oxygen via MOXIE.' },
+    { id: 'curiosity', name: 'Curiosity Rover (MSL)', type: 'msl_rover', lat: -4.5895, lon: 137.4417, coordStr: '4.5895° S, 137.4417° E', region: 'Gale Crater / Mount Sharp', date: 'Aug 6, 2012', status: 'Active (>5000 Sols)', temp: '-90°C to +15°C', grav: '3.72 m/s²', rad: '580 µSv/day', tag: 'MARS SCIENCE LABORATORY', text: 'Nuclear-powered rover climbing the foothills of Aeolis Mons studying ancient habitable lakebeds.', legacy: 'Scientific Legacy: Proved Gale Crater once held a freshwater lake with key ingredients for life.' },
+    { id: 'opportunity', name: 'Opportunity Rover (MER-B)', type: 'mer_rover', lat: -1.9483, lon: -5.5258, coordStr: '1.9483° S, 354.4742° E', region: 'Meridiani Planum', date: 'Jan 25, 2004', status: 'Silent (2018 Dust Storm)', temp: '-85°C to +10°C', grav: '3.72 m/s²', rad: '540 µSv/day', tag: 'MARS EXPLORATION ROVER', text: 'Survived nearly 15 years and drove 45.16 km before a global dust storm blocked solar arrays.', legacy: 'Scientific Legacy: Discovered hematite "blueberries" confirming liquid water flowed on Mars.' },
+    { id: 'viking1', name: 'Viking 1 Lander', type: 'viking', lat: 22.482, lon: -47.968, coordStr: '22.482° N, 47.968° W', region: 'Chryse Planitia', date: 'July 20, 1976', status: 'Silent Monument', temp: '-88°C to -10°C', grav: '3.72 m/s²', rad: '520 µSv/day', tag: 'VIKING PROGRAM • FIRST SUCCESS', text: 'First spacecraft to successfully operate on the Martian surface, transmitting color panoramas.', legacy: 'Scientific Legacy: Conducted the first soil biology experiments on Mars.' }
+  ]
+};
+
+const LANDMARKS = {
+  moon: [
+    { name: 'MARE TRANQUILLITATIS', lat: 8.5, lon: 31.4 },
+    { name: 'OCEANUS PROCELLARUM', lat: 18.4, lon: -57.4 },
+    { name: 'MARE IMBRIUM', lat: 32.8, lon: -15.6 },
+    { name: 'TYCHO CRATER', lat: -43.3, lon: -11.2 }
+  ],
+  mars: [
+    { name: 'OLYMPUS MONS', lat: 18.65, lon: -133.8 },
+    { name: 'VALLES MARINERIS', lat: -13.9, lon: -59.2 },
+    { name: 'HELLAS PLANITIA', lat: -42.4, lon: 70.5 },
+    { name: 'THARSIS MONTES', lat: 1.0, lon: -112.5 }
+  ]
+};
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+controls.minDistance = 7.5;
+controls.maxDistance = 28;
+
+const sunLight = new THREE.DirectionalLight(0xfff6ea, 3.1);
+sunLight.position.set(22, 12, 16);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(2048, 2048);
+sunLight.shadow.bias = -0.0005;
+scene.add(sunLight);
+scene.add(new THREE.AmbientLight(0x22324f, 0.65));
+
+// Particle Dust System
+let particleSystem;
+function createDustParticles(isMoon) {
+  if (particleSystem) scene.remove(particleSystem);
+  const count = 450;
+  const geo = new THREE.BufferGeometry();
+  const pos = [];
+  for(let i=0; i<count; i++) {
+    pos.push((Math.random()-.5)*70, Math.random()*15, (Math.random()-.5)*70);
+  }
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({
+    color: isMoon ? 0xcceeff : 0xffaa77,
+    size: 0.12, transparent: true, opacity: 0.45
+  });
+  particleSystem = new THREE.Points(geo, mat);
+  scene.add(particleSystem);
+}
+
+function createStars() {
+  const geo = new THREE.BufferGeometry();
+  const pos = [], cols = [];
+  for (let i = 0; i < 4000; i++) {
+    const r = 240 + Math.random() * 160;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    pos.push(r * Math.sin(phi) * Math.cos(theta), r * Math.cos(phi), r * Math.sin(phi) * Math.sin(theta));
+    const c = new THREE.Color().setHSL(0.58 + Math.random() * 0.12, 0.3, 0.75 + Math.random() * 0.25);
+    cols.push(c.r, c.g, c.b);
+  }
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  return new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.7, vertexColors: true }));
+}
+scene.add(createStars());
+
+function generatePlanetaryTextures(body) {
+  const w = 1024, h = 512;
+  const colCanvas = document.createElement('canvas'); colCanvas.width = w; colCanvas.height = h;
+  const bumpCanvas = document.createElement('canvas'); bumpCanvas.width = w; bumpCanvas.height = h;
+  const ctx = colCanvas.getContext('2d');
+  const btx = bumpCanvas.getContext('2d');
+
+  ctx.fillStyle = body === 'moon' ? '#74726e' : '#a24929';
+  ctx.fillRect(0, 0, w, h);
+  btx.fillStyle = '#808080';
+  btx.fillRect(0, 0, w, h);
+
+  const patches = body === 'moon' ? 32 : 40;
+  for (let i = 0; i < patches; i++) {
+    const x = Math.random() * w, y = Math.random() * h;
+    const rx = 45 + Math.random() * 150, ry = 28 + Math.random() * 95;
+    const grad = ctx.createRadialGradient(x, y, 5, x, y, rx);
+    if (body === 'moon') {
+      grad.addColorStop(0, 'rgba(42, 44, 48, 0.6)');
+      grad.addColorStop(1, 'rgba(116, 114, 110, 0)');
+    } else {
+      grad.addColorStop(0, i % 2 === 0 ? 'rgba(74, 28, 16, 0.5)' : 'rgba(204, 112, 68, 0.4)');
+      grad.addColorStop(1, 'rgba(162, 73, 41, 0)');
+    }
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  const craterCount = body === 'moon' ? 750 : 380;
+  for (let i = 0; i < craterCount; i++) {
+    const x = Math.random() * w;
+    const y = 20 + Math.random() * (h - 40);
+    const r = 1.5 + Math.pow(Math.random(), 2.8) * 28;
+
+    const bGrad = btx.createRadialGradient(x, y, r * 0.1, x, y, r * 1.25);
+    bGrad.addColorStop(0, 'rgba(25,25,25,0.8)');
+    bGrad.addColorStop(0.78, 'rgba(115,115,115,0.5)');
+    bGrad.addColorStop(0.92, 'rgba(240,240,240,0.9)');
+    bGrad.addColorStop(1, 'rgba(128,128,128,0)');
+    btx.fillStyle = bGrad;
+    btx.beginPath(); btx.arc(x, y, r * 1.25, 0, Math.PI * 2); btx.fill();
+
+    ctx.strokeStyle = body === 'moon' ? 'rgba(225,225,225,0.18)' : 'rgba(235,150,110,0.16)';
+    ctx.lineWidth = Math.max(0.8, r * 0.1);
+    ctx.beginPath(); ctx.arc(x, y, r * 0.92, 0, Math.PI * 2); ctx.stroke();
+  }
+
+  const map = new THREE.CanvasTexture(colCanvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+  return { map, bumpMap, sourceCanvas: colCanvas };
+}
+
+const moonTex = generatePlanetaryTextures('moon');
+const marsTex = generatePlanetaryTextures('mars');
+
+// 2D Tactical Map
+const mapContainer = document.getElementById('mapContainer');
+const mapCanvas = document.getElementById('planetMapCanvas');
+const mctx = mapCanvas.getContext('2d');
+let mapZoom = 1.0, mapPanX = 0, mapPanY = 0, isDraggingMap = false, dragStartX = 0, dragStartY = 0, mapPinScreenCoords = [];
+
+function resizeMapCanvas() {
+  mapCanvas.width = innerWidth * Math.min(devicePixelRatio, 2);
+  mapCanvas.height = innerHeight * Math.min(devicePixelRatio, 2);
+  if (viewMode === 'map') drawPlanetaryMap();
+}
+
+function latLonToMapXY(lat, lon, rect) {
+  return { x: rect.x + ((lon + 180) / 360) * rect.w, y: rect.y + ((90 - lat) / 180) * rect.h };
+}
+
+function screenToLatLon(clientX, clientY) {
+  const dpr = Math.min(devicePixelRatio, 2);
+  const rect = getMapDrawRect();
+  const nx = (clientX * dpr - rect.x) / rect.w;
+  const ny = (clientY * dpr - rect.y) / rect.h;
+  return { lat: THREE.MathUtils.clamp(90 - ny * 180, -90, 90), lon: THREE.MathUtils.clamp(nx * 360 - 180, -180, 180) };
+}
+
+function getMapDrawRect() {
+  const cw = mapCanvas.width, ch = mapCanvas.height;
+  const baseW = Math.min(cw * 0.88, ch * 1.7) * mapZoom;
+  const baseH = baseW * 0.5;
+  return { x: (cw - baseW) * 0.5 + mapPanX, y: (ch - baseH) * 0.5 + mapPanY, w: baseW, h: baseH };
+}
+
+function drawPlanetaryMap() {
+  const dpr = Math.min(devicePixelRatio, 2);
+  const cw = mapCanvas.width, ch = mapCanvas.height;
+  mctx.clearRect(0, 0, cw, ch);
+  mctx.fillStyle = '#02040a'; mctx.fillRect(0, 0, cw, ch);
+
+  const rect = getMapDrawRect();
+  const texCanvas = currentBody === 'moon' ? moonTex.sourceCanvas : marsTex.sourceCanvas;
+
+  mctx.save();
+  mctx.shadowColor = currentBody === 'moon' ? 'rgba(139, 233, 255, 0.3)' : 'rgba(255, 158, 109, 0.3)';
+  mctx.shadowBlur = 35 * dpr;
+  mctx.drawImage(texCanvas, rect.x, rect.y, rect.w, rect.h);
+  mctx.restore();
+
+  mctx.strokeStyle = 'rgba(139, 233, 255, 0.4)';
+  mctx.lineWidth = 1.5 * dpr;
+  mctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+
+  mctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+  mctx.lineWidth = 1 * dpr;
+  mctx.font = `${10 * dpr}px monospace`;
+  mctx.fillStyle = 'rgba(180, 200, 225, 0.6)';
+
+  for (let lon = -180; lon <= 180; lon += 30) {
+    const p1 = latLonToMapXY(90, lon, rect), p2 = latLonToMapXY(-90, lon, rect);
+    mctx.beginPath(); mctx.moveTo(p1.x, p1.y); mctx.lineTo(p2.x, p2.y); mctx.stroke();
+  }
+  for (let lat = -60; lat <= 60; lat += 30) {
+    const p1 = latLonToMapXY(lat, -180, rect), p2 = latLonToMapXY(lat, 180, rect);
+    mctx.beginPath(); mctx.moveTo(p1.x, p1.y); mctx.lineTo(p2.x, p2.y); mctx.stroke();
+  }
+
+  mctx.font = `600 ${10 * dpr}px Inter, sans-serif`;
+  mctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+  mctx.textAlign = 'center';
+  LANDMARKS[currentBody].forEach((lm) => {
+    const pt = latLonToMapXY(lm.lat, lm.lon, rect);
+    mctx.fillText(lm.name, pt.x, pt.y);
+  });
+
+  mapPinScreenCoords = [];
+  const accent = currentBody === 'moon' ? '#8be9ff' : '#ffb36b';
+
+  MISSIONS[currentBody].forEach((m) => {
+    const pt = latLonToMapXY(m.lat, m.lon, rect);
+    const isSel = selectedMission.id === m.id;
+    mapPinScreenCoords.push({ mission: m, x: pt.x / dpr, y: pt.y / dpr });
+
+    mctx.beginPath(); mctx.arc(pt.x, pt.y, (isSel ? 15 : 10) * dpr, 0, Math.PI * 2);
+    mctx.fillStyle = isSel ? 'rgba(255, 213, 138, 0.3)' : 'rgba(139, 233, 255, 0.18)';
+    mctx.fill();
+    mctx.lineWidth = (isSel ? 2.2 : 1.4) * dpr;
+    mctx.strokeStyle = isSel ? '#ffd58a' : accent;
+    mctx.stroke();
+
+    mctx.beginPath(); mctx.arc(pt.x, pt.y, 4.5 * dpr, 0, Math.PI * 2);
+    mctx.fillStyle = isSel ? '#ffd58a' : '#ffffff';
+    mctx.fill();
+
+    mctx.font = `bold ${11 * dpr}px Inter, sans-serif`;
+    mctx.textAlign = 'left';
+    mctx.fillStyle = isSel ? '#ffd58a' : '#ffffff';
+    mctx.fillText(m.name, pt.x + 15 * dpr, pt.y + 4 * dpr);
+  });
+}
+
+mapContainer.addEventListener('mousedown', (e) => { isDraggingMap = true; dragStartX = e.clientX; dragStartY = e.clientY; });
+window.addEventListener('mousemove', (e) => {
+  if (viewMode !== 'map') return;
+  const dpr = Math.min(devicePixelRatio, 2);
+  if (isDraggingMap) {
+    mapPanX += (e.clientX - dragStartX) * dpr; mapPanY += (e.clientY - dragStartY) * dpr;
+    dragStartX = e.clientX; dragStartY = e.clientY;
+    drawPlanetaryMap();
+  }
+  const ll = screenToLatLon(e.clientX, e.clientY);
+  document.getElementById('coordReadout').textContent = `CURSOR: ${Math.abs(ll.lat).toFixed(3)}° ${ll.lat>=0?'N':'S'}, ${Math.abs(ll.lon).toFixed(3)}° ${ll.lon>=0?'E':'W'}`;
+});
+window.addEventListener('mouseup', (e) => {
+  if (!isDraggingMap) return;
+  const moved = Math.hypot(e.clientX - dragStartX, e.clientY - dragStartY);
+  isDraggingMap = false;
+  if (viewMode === 'map' && moved < 6) {
+    for (const pin of mapPinScreenCoords) {
+      if (Math.hypot(e.clientX - pin.x, e.clientY - pin.y) < 24) {
+        selectedMission = pin.mission;
+        renderSiteSidebar(); showMissionCard(selectedMission, true); drawPlanetaryMap();
+        break;
+      }
+    }
+  }
+});
+mapContainer.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  mapZoom = THREE.MathUtils.clamp(mapZoom * (e.deltaY < 0 ? 1.15 : 0.88), 0.8, 6.0);
+  drawPlanetaryMap();
+}, { passive: false });
+
+// Hyper-Realistic Hardware Materials & Builders
+const mat = (c, rough = 0.5, metal = 0.4) => new THREE.MeshStandardMaterial({ color: c, roughness: rough, metalness: metal });
+function part(parent, geo, material, pos = [0,0,0], rot = [0,0,0]) {
+  const m = new THREE.Mesh(geo, material);
+  m.position.set(...pos); m.rotation.set(...rot);
+  m.castShadow = true; m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+
+function buildHardwareModel(type) {
+  const g = new THREE.Group();
+  const goldFoil = mat(0xdfa036, 0.28, 0.92);
+  const whiteBody = mat(0xf0f3f8, 0.4, 0.15);
+  const darkMetal = mat(0x1a212c, 0.5, 0.8);
+  const silver = mat(0xc5ccd6, 0.3, 0.85);
+  const solarBlue = mat(0x142c4c, 0.2, 0.7);
+
+  if (type === 'msl_rover') {
+    part(g, new THREE.BoxGeometry(1.4, 0.55, 1.9), whiteBody, [0, 0.95, 0]);
+    part(g, new THREE.BoxGeometry(1.25, 0.12, 1.75), goldFoil, [0, 1.25, 0]);
+    part(g, new THREE.CylinderGeometry(0.22, 0.26, 0.75, 12), whiteBody, [0, 1.25, -1.05], [-0.55, 0, 0]);
+    part(g, new THREE.CylinderGeometry(0.06, 0.08, 1.05, 10), whiteBody, [0.38, 1.7, 0.62]);
+    part(g, new THREE.BoxGeometry(0.42, 0.24, 0.28), whiteBody, [0.38, 2.25, 0.65]);
+    part(g, new THREE.CylinderGeometry(0.04, 0.04, 0.9, 8), darkMetal, [-0.3, 1.05, 1.25], [1.1, 0, 0.2]);
+    part(g, new THREE.SphereGeometry(0.16, 12, 12), silver, [-0.42, 0.85, 1.65]);
+    for (const side of [-1, 1]) {
+      part(g, new THREE.BoxGeometry(0.06, 0.08, 1.7), darkMetal, [side * 0.82, 0.75, 0]);
+      for (const z of [-0.85, 0, 0.85]) {
+        part(g, new THREE.CylinderGeometry(0.28, 0.28, 0.24, 18), darkMetal, [side * 0.92, 0.28, z], [0, 0, Math.PI/2]);
+        part(g, new THREE.CylinderGeometry(0.14, 0.14, 0.25, 12), silver, [side * 0.92, 0.28, z], [0, 0, Math.PI/2]);
+      }
+    }
+  } else if (type === 'mer_rover') {
+    part(g, new THREE.BoxGeometry(1.3, 0.1, 1.2), solarBlue, [0, 0.78, 0]);
+    part(g, new THREE.BoxGeometry(0.65, 0.35, 0.7), goldFoil, [0, 0.55, 0]);
+    part(g, new THREE.CylinderGeometry(0.04, 0.05, 0.85, 8), whiteBody, [0.22, 1.18, 0.32]);
+    part(g, new THREE.BoxGeometry(0.32, 0.14, 0.18), whiteBody, [0.22, 1.6, 0.34]);
+    for (const side of [-1, 1]) {
+      for (const z of [-0.55, 0, 0.55]) {
+        part(g, new THREE.CylinderGeometry(0.17, 0.17, 0.15, 14), darkMetal, [side * 0.62, 0.17, z], [0, 0, Math.PI/2]);
+      }
+    }
+  } else if (type === 'lunar_rover') {
+    part(g, new THREE.BoxGeometry(1.35, 0.14, 2.3), silver, [0, 0.55, 0]);
+    for (const x of [-0.34, 0.34]) {
+      part(g, new THREE.BoxGeometry(0.45, 0.42, 0.08), whiteBody, [x, 0.82, -0.25], [-0.2, 0, 0]);
+      part(g, new THREE.BoxGeometry(0.45, 0.08, 0.42), whiteBody, [x, 0.63, -0.05]);
+    }
+    part(g, new THREE.CylinderGeometry(0.02, 0.02, 0.95, 8), silver, [0, 1.05, 0.85]);
+    part(g, new THREE.ConeGeometry(0.48, 0.25, 18, 1, true), goldFoil, [0, 1.55, 0.85], [Math.PI, 0, 0]);
+    for (const x of [-0.78, 0.78]) {
+      for (const z of [-0.85, 0.85]) {
+        part(g, new THREE.CylinderGeometry(0.32, 0.32, 0.22, 18), darkMetal, [x, 0.32, z], [0, 0, Math.PI/2]);
+      }
+    }
+  } else if (type === 'lander') {
+    part(g, new THREE.CylinderGeometry(1.45, 1.45, 1.15, 8), goldFoil, [0, 1.35, 0]);
+    part(g, new THREE.CylinderGeometry(0.75, 0.9, 0.4, 12), darkMetal, [0, 2.0, 0]);
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2 + Math.PI / 4;
+      const leg = part(g, new THREE.CylinderGeometry(0.05, 0.06, 1.65, 8), goldFoil, [Math.cos(a)*1.45, 0.82, Math.sin(a)*1.45]);
+      leg.rotation.z = -Math.cos(a) * 0.45; leg.rotation.x = Math.sin(a) * 0.45;
+      part(g, new THREE.CylinderGeometry(0.36, 0.4, 0.08, 14), goldFoil, [Math.cos(a)*1.85, 0.04, Math.sin(a)*1.85]);
+    }
+  } else {
+    part(g, new THREE.CylinderGeometry(0.95, 0.95, 0.55, 6), whiteBody, [0, 0.85, 0]);
+    part(g, new THREE.CylinderGeometry(0.38, 0.38, 0.12, 18), whiteBody, [0, 1.55, -0.2], [0.4, 0, 0]);
+    for (let i = 0; i < 3; i++) {
+      const a = i * (Math.PI * 2 / 3);
+      part(g, new THREE.CylinderGeometry(0.05, 0.05, 0.95, 8), silver, [Math.cos(a)*0.85, 0.45, Math.sin(a)*0.85]);
+      part(g, new THREE.CylinderGeometry(0.25, 0.28, 0.07, 12), darkMetal, [Math.cos(a)*0.95, 0.04, Math.sin(a)*0.95]);
+    }
+  }
+  return g;
+}
+
+const PLANET_RADIUS = 5.0;
+function latLonToVector3(lat, lon, radius = PLANET_RADIUS) {
+  const phi = (90 - lat) * (Math.PI / 180);
+  const theta = (lon + 180) * (Math.PI / 180);
+  return new THREE.Vector3(-(radius * Math.sin(phi) * Math.cos(theta)), radius * Math.cos(phi), radius * Math.sin(phi) * Math.sin(theta));
+}
+
+let currentBody = 'moon';
+let viewMode = 'orbit';
+let selectedMission = MISSIONS.moon[0];
+
+const orbitGroup = new THREE.Group();
+const surfaceGroup = new THREE.Group();
+scene.add(orbitGroup);
+scene.add(surfaceGroup);
+surfaceGroup.visible = false;
+
+let planetMesh, atmosphereMesh, beaconMeshes = [];
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+
+function buildOrbitPlanet(body) {
+  while (orbitGroup.children.length) orbitGroup.remove(orbitGroup.children[0]);
+  beaconMeshes = [];
+
+  const tex = body === 'moon' ? moonTex : marsTex;
+  const geo = new THREE.SphereGeometry(PLANET_RADIUS, 96, 64);
+  const material = new THREE.MeshStandardMaterial({
+    map: tex.map, bumpMap: tex.bumpMap,
+    bumpScale: body === 'moon' ? 0.09 : 0.07,
+    roughness: 0.9, metalness: 0.03
+  });
+  planetMesh = new THREE.Mesh(geo, material);
+  planetMesh.castShadow = true; planetMesh.receiveShadow = true;
+  orbitGroup.add(planetMesh);
+
+  if (body === 'mars') {
+    const atmoGeo = new THREE.SphereGeometry(PLANET_RADIUS * 1.03, 64, 48);
+    const atmoMat = new THREE.MeshBasicMaterial({ color: 0xff7b47, transparent: true, opacity: 0.16, side: THREE.BackSide });
+    atmosphereMesh = new THREE.Mesh(atmoGeo, atmoMat);
+    orbitGroup.add(atmosphereMesh);
+  }
+
+  MISSIONS[body].forEach((m) => {
+    const pos = latLonToVector3(m.lat, m.lon, PLANET_RADIUS + 0.04);
+    const pinGroup = new THREE.Group();
+    pinGroup.position.copy(pos); pinGroup.lookAt(0, 0, 0);
+
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 14), new THREE.MeshBasicMaterial({ color: body === 'moon' ? 0x8be9ff : 0xffb36b }));
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.15, 0.24, 24), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.9 }));
+    pinGroup.add(core, ring);
+    pinGroup.userData.mission = m; core.userData.mission = m; ring.userData.mission = m;
+
+    orbitGroup.add(pinGroup);
+    beaconMeshes.push(pinGroup);
+  });
+  createDustParticles(body === 'moon');
+}
+
+let surfaceObjects = [];
+let yaw = 0, pitch = 0, locked = false;
+const keys = {};
+
+function enterSurfaceMode(mission) {
+  selectedMission = mission;
+  viewMode = 'surface';
+  mapContainer.style.display = 'none';
+  orbitGroup.visible = false;
+  surfaceGroup.visible = true;
+  controls.enabled = false;
+
+  while (surfaceGroup.children.length) surfaceGroup.remove(surfaceGroup.children[0]);
+  surfaceObjects = [];
+
+  const isMoon = currentBody === 'moon';
+  scene.background = new THREE.Color(isMoon ? 0x010307 : 0x1c0d08);
+  scene.fog = new THREE.FogExp2(isMoon ? 0x010307 : 0x2e130c, isMoon ? 0.007 : 0.012);
+  sunLight.color.set(isMoon ? 0xffffff : 0xffcb99);
+
+  const groundGeo = new THREE.PlaneGeometry(260, 260, 140, 140);
+  const posAttr = groundGeo.attributes.position;
+  for (let i = 0; i < posAttr.count; i++) {
+    const x = posAttr.getX(i), y = posAttr.getY(i);
+    const dist = Math.hypot(x, y);
+    const flatten = Math.min(1, Math.max(0, (dist - 4) / 15));
+    const h = (Math.sin(x * 0.12) * Math.cos(y * 0.12) * 0.65 + Math.sin(x * 0.35 + y * 0.25) * 0.2) * flatten;
+    posAttr.setZ(i, h);
+  }
+  groundGeo.computeVertexNormals();
+  const ground = new THREE.Mesh(groundGeo, new THREE.MeshStandardMaterial({
+    color: isMoon ? 0x686662 : 0x8e4225, roughness: 0.95, metalness: 0.02
+  }));
+  ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+  surfaceGroup.add(ground);
+
+  const rockMat = mat(isMoon ? 0x4a4845 : 0x5e2b19, 0.95, 0.05);
+  for (let i = 0; i < 100; i++) {
+    const a = Math.random() * Math.PI * 2, d = 6 + Math.random() * 70, r = 0.15 + Math.random() * 1.1;
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 1), rockMat);
+    rock.position.set(Math.cos(a) * d, r * 0.35, Math.sin(a) * d);
+    rock.scale.set(1 + Math.random() * 0.6, 0.5, 1);
+    rock.castShadow = true; rock.receiveShadow = true;
+    surfaceGroup.add(rock);
+  }
+
+  const model = buildHardwareModel(mission.type);
+  model.position.set(0, 0, 0); model.userData.mission = mission;
+  surfaceGroup.add(model); surfaceObjects.push(model);
+
+  const spot = new THREE.PointLight(isMoon ? 0x8be9ff : 0xffb36b, 2.5, 9);
+  spot.position.set(0, 3.4, 0);
+  surfaceGroup.add(spot);
+
+  camera.position.set(0, 1.85, 6.2);
+  yaw = 0; pitch = -0.05;
+  camera.rotation.order = 'YXZ'; camera.rotation.set(pitch, yaw, 0);
+
+  updateHUD();
+  showMissionCard(mission, false);
+}
+
+function enterOrbitMode() {
+  viewMode = 'orbit';
+  mapContainer.style.display = 'none';
+  orbitGroup.visible = true; surfaceGroup.visible = false;
+  controls.enabled = true;
+  scene.background = new THREE.Color(0x020308); scene.fog = null;
+  if (document.pointerLockElement) document.exitPointerLock();
+
+  const targetPos = latLonToVector3(selectedMission.lat, selectedMission.lon, 13.5);
+  camera.position.copy(targetPos); controls.target.set(0, 0, 0); controls.update();
+  updateHUD();
+}
+
+function enterMapMode() {
+  viewMode = 'map';
+  if (document.pointerLockElement) document.exitPointerLock();
+  controls.enabled = false;
+  mapContainer.style.display = 'flex';
+  mapZoom = 1.0; mapPanX = 0; mapPanY = 0;
+  resizeMapCanvas(); updateHUD(); showMissionCard(selectedMission, true);
+}
+
+function renderSiteSidebar() {
+  const list = document.getElementById('siteList');
+  list.innerHTML = `<h3>${currentBody === 'moon' ? 'Lunar' : 'Martian'} Landing Sites</h3>`;
+  MISSIONS[currentBody].forEach((m) => {
+    const div = document.createElement('div');
+    div.className = 'site-item' + (selectedMission.id === m.id ? ' selected' : '');
+    div.innerHTML = `<div class="name">${m.name}</div><div class="coords">${m.coordStr}</div><div class="region">${m.region}</div>`;
+    div.onclick = () => {
+      selectedMission = m; renderSiteSidebar(); showMissionCard(m, true);
+      if (viewMode === 'orbit') {
+        camera.position.copy(latLonToVector3(m.lat, m.lon, 12.5)); controls.update();
+      } else if (viewMode === 'map') {
+        drawPlanetaryMap();
+      } else {
+        enterSurfaceMode(m);
+      }
+    };
+    list.appendChild(div);
+  });
+}
+
+function showMissionCard(m, showLandButton = true) {
+  document.getElementById('infoTag').textContent = m.tag;
+  document.getElementById('infoTitle').textContent = m.name;
+  document.getElementById('infoCoords').textContent = m.coordStr;
+  document.getElementById('infoTemp').textContent = m.temp;
+  document.getElementById('infoGravity').textContent = m.grav;
+  document.getElementById('infoRad').textContent = m.rad;
+  document.getElementById('infoText').textContent = m.text;
+  document.getElementById('infoExtra').textContent = m.legacy;
+  document.getElementById('landHereBtn').style.display = (viewMode !== 'surface' && showLandButton) ? 'block' : 'none';
+  document.getElementById('info').style.display = 'block';
+  document.getElementById('coordReadout').textContent = `SITE: ${m.coordStr} (${m.region})`;
+}
+
+function updateHUD() {
+  const isMoon = currentBody === 'moon';
+  document.getElementById('moonBtn').className = isMoon ? 'active' : '';
+  document.getElementById('marsBtn').className = !isMoon ? 'mars-active' : '';
+  document.getElementById('orbitModeBtn').className = viewMode === 'orbit' ? 'mode-active' : '';
+  document.getElementById('mapModeBtn').className = viewMode === 'map' ? 'mode-active' : '';
+  document.getElementById('surfaceModeBtn').className = viewMode === 'surface' ? 'mode-active' : '';
+
+  if (viewMode === 'orbit') {
+    document.getElementById('modeBadge').textContent = 'ORBITAL RECONNAISSANCE';
+    document.getElementById('worldTitle').textContent = isMoon ? 'THE MOON (LUNA)' : 'MARS (SOL SYSTEM IV)';
+    document.getElementById('worldSub').textContent = 'Click any real-coordinate beacon to inspect & descend to surface';
+    document.getElementById('controlsHint').innerHTML = '<b>Drag</b> Rotate Globe · <b>Scroll</b> Zoom · <b>Click Beacon</b> Select Site';
+  } else if (viewMode === 'map') {
+    document.getElementById('modeBadge').textContent = 'TACTICAL COORDINATE MAP';
+    document.getElementById('worldTitle').textContent = isMoon ? 'LUNAR SURFACE MAP' : 'MARTIAN SURFACE MAP';
+    document.getElementById('worldSub').textContent = 'Global equirectangular projection with NASA landing coordinates';
+    document.getElementById('controlsHint').innerHTML = '<b>Drag</b> Pan Map · <b>Scroll</b> Zoom · <b>Click Pin</b> Select Site';
+  } else {
+    document.getElementById('modeBadge').textContent = `SURFACE WALK • ${selectedMission.region.toUpperCase()}`;
+    document.getElementById('worldTitle').textContent = selectedMission.name.toUpperCase();
+    document.getElementById('worldSub').textContent = `Real Location: ${selectedMission.coordStr} — Walk with WASD or D-Pad`;
+    document.getElementById('controlsHint').innerHTML = '<b>WASD</b> Walk · <b>Mouse/Touch</b> Look · <b>Esc</b> Unlock';
+  }
+  document.getElementById('crosshair').style.display = viewMode === 'surface' ? 'block' : 'none';
+}
+
+function switchPlanet(body) {
+  currentBody = body; selectedMission = MISSIONS[body][0];
+  buildOrbitPlanet(body); renderSiteSidebar();
+  if (viewMode === 'surface') enterSurfaceMode(selectedMission);
+  else if (viewMode === 'map') enterMapMode();
+  else enterOrbitMode();
+  showMissionCard(selectedMission, true);
+}
+
+document.getElementById('moonBtn').onclick = () => switchPlanet('moon');
+document.getElementById('marsBtn').onclick = () => switchPlanet('mars');
+document.getElementById('orbitModeBtn').onclick = () => enterOrbitMode();
+document.getElementById('mapModeBtn').onclick = () => enterMapMode();
+document.getElementById('surfaceModeBtn').onclick = () => enterSurfaceMode(selectedMission);
+document.getElementById('landHereBtn').onclick = () => enterSurfaceMode(selectedMission);
+document.getElementById('closeInfo').onclick = () => document.getElementById('info').style.display = 'none';
+document.getElementById('startBtn').onclick = () => { document.getElementById('start').style.display = 'none'; };
+
+// Mobile D-Pad Touch Handlers
+const bindTouch = (id, code) => {
+  const el = document.getElementById(id);
+  el.ontouchstart = (e) => { e.preventDefault(); keys[code] = true; };
+  el.ontouchend = (e) => { e.preventDefault(); keys[code] = false; };
+  el.onmousedown = () => keys[code] = true;
+  el.onmouseup = () => keys[code] = false;
+};
+bindTouch('btnW', 'KeyW'); bindTouch('btnS', 'KeyS');
+bindTouch('btnA', 'KeyA'); bindTouch('btnD', 'KeyD');
+
+// Touch drag to look around on mobile
+let touchX = 0, touchY = 0, isTouching = false;
+window.addEventListener('touchstart', (e) => {
+  if (viewMode === 'surface' && e.touches.length === 1 && e.target.tagName !== 'BUTTON') {
+    isTouching = true; touchX = e.touches[0].clientX; touchY = e.touches[0].clientY;
+  }
+});
+window.addEventListener('touchmove', (e) => {
+  if (viewMode !== 'surface' || !isTouching) return;
+  const dx = e.touches[0].clientX - touchX, dy = e.touches[0].clientY - touchY;
+  touchX = e.touches[0].clientX; touchY = e.touches[0].clientY;
+  yaw -= dx * 0.003; pitch = Math.max(-1.2, Math.min(1.2, pitch - dy * 0.003));
+  camera.rotation.order = 'YXZ'; camera.rotation.set(pitch, yaw, 0);
+});
+window.addEventListener('touchend', () => isTouching = false);
+
+renderer.domElement.addEventListener('click', (e) => {
+  if (viewMode === 'orbit') {
+    pointer.x = (e.clientX / innerWidth) * 2 - 1; pointer.y = -(e.clientY / innerHeight) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObjects(beaconMeshes, true);
+    if (hits.length) {
+      let obj = hits[0].object; while (obj && !obj.userData.mission) obj = obj.parent;
+      if (obj) { selectedMission = obj.userData.mission; renderSiteSidebar(); showMissionCard(selectedMission, true); }
+    }
+  } else if (viewMode === 'surface') {
+    if (!locked) { renderer.domElement.requestPointerLock?.(); }
+    else {
+      raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+      const hits = raycaster.intersectObjects(surfaceObjects, true);
+      if (hits.length) showMissionCard(selectedMission, false);
+    }
+  }
+});
+
+document.addEventListener('pointerlockchange', () => locked = document.pointerLockElement === renderer.domElement);
+document.addEventListener('mousemove', (e) => {
+  if (viewMode !== 'surface' || !locked) return;
+  yaw -= e.movementX * 0.0022; pitch = Math.max(-1.2, Math.min(1.2, pitch - e.movementY * 0.0022));
+  camera.rotation.order = 'YXZ'; camera.rotation.set(pitch, yaw, 0);
+});
+document.addEventListener('keydown', (e) => keys[e.code] = true);
+document.addEventListener('keyup', (e) => keys[e.code] = false);
+
+buildOrbitPlanet('moon'); renderSiteSidebar(); enterOrbitMode(); showMissionCard(MISSIONS.moon[0], true);
+
+let lastTime = performance.now();
+function animate(now) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((now - lastTime) / 1000, 0.05); lastTime = now;
+
+  if (particleSystem) {
+    const pos = particleSystem.geometry.attributes.position.array;
+    for(let i=1; i<pos.length; i+=3) {
+      pos[i] -= dt * 0.8; if(pos[i] < 0) pos[i] = 15;
+    }
+    particleSystem.geometry.attributes.position.needsUpdate = true;
+  }
+
+  if (viewMode === 'orbit') {
+    controls.update();
+    const pulse = 1 + Math.sin(now * 0.005) * 0.18;
+    beaconMeshes.forEach((b) => { if (b.children[1]) b.children[1].scale.set(pulse, pulse, 1); });
+  } else if (viewMode === 'surface') {
+    const move = new THREE.Vector3();
+    if (keys.KeyW || keys.ArrowUp) move.z -= 1;
+    if (keys.KeyS || keys.ArrowDown) move.z += 1;
+    if (keys.KeyA || keys.ArrowLeft) move.x -= 1;
+    if (keys.KeyD || keys.ArrowRight) move.x += 1;
+    if (move.lengthSq() > 0) {
+      move.normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+      camera.position.addScaledVector(move, dt * 5.8);
+    }
+    camera.position.x = THREE.MathUtils.clamp(camera.position.x, -35, 35);
+    camera.position.z = THREE.MathUtils.clamp(camera.position.z, -35, 35);
+    camera.position.y = 1.85;
+  }
+
+  if (viewMode !== 'map') renderer.render(scene, camera);
+}
+requestAnimationFrame(animate);
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); resizeMapCanvas();
+});
+</script>
+</body>
+</html>
